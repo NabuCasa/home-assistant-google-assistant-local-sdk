@@ -1,0 +1,48 @@
+{
+  "requestId": "0E66545FD86D3694B1D4B6125E8C0723",
+  "inputs": [
+    {
+      "intent": "action.devices.IDENTIFY",
+      "payload": {
+        "device": {
+          "mdnsScanData": {
+            "additionals": [
+              {
+                "type": "TXT",
+                "class": "IN",
+                "name": "home._home-assistant._tcp.local",
+                "ttl": 4500,
+                "data": [
+                  "version=0.100.0b3",
+                  "base_url=http://192.168.1.150:8123",
+                  "requires_api_password=true"
+                ]
+              }
+            ]
+          }
+        },
+        "structureData": {}
+      }
+    }
+  ],
+  "devices": [
+    {
+      "id": "light.kitchen_lights",
+      "customData": {
+        "webhookId": "dde3b9800a905e886cc4d38e226a6e7e3f2a6993d2b9b9f63d13e42ee7de3219"
+      }
+    },
+    {
+      "id": "light.ceiling_lights",
+      "customData": {
+        "webhookId": "dde3b9800a905e886cc4d38e226a6e7e3f2a6993d2b9b9f63d13e42ee7de3219"
+      }
+    },
+    {
+      "id": "light.bed_light",
+      "customData": {
+        "webhookId": "dde3b9800a905e886cc4d38e226a6e7e3f2a6993d2b9b9f63d13e42ee7de3219"
+      }
+    }
+  ]
+}
