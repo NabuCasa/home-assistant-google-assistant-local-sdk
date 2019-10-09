@@ -45,6 +45,20 @@ interface HassCustomDeviceData {
   proxyDeviceId: string;
 }
 
+class UnknownInstance extends Error {
+  constructor(public requestId: string) {
+    super();
+  }
+
+  throwHandlerError() {
+    throw new IntentFlow.HandlerError(
+      this.requestId,
+      "invalidRequest",
+      "Unknown Instance"
+    );
+  }
+}
+
 const forwardRequest = async (
   hassDeviceData: HassCustomDeviceData,
   targetDeviceId: string,
@@ -88,6 +102,11 @@ const forwardRequest = async (
     );
   }
 
+  // Response if the webhook is not registered.
+  if (resp.httpResponse.statusCode === 200 && !resp.httpResponse.body) {
+    throw new UnknownInstance(request.requestId);
+  }
+
   try {
     const response = JSON.parse(resp.httpResponse.body as string);
 
@@ -102,8 +121,7 @@ const forwardRequest = async (
     return response;
   } catch (err) {
     console.error(request.requestId, "Error parsing body", err);
-    // TODO this can be hitting a webhook on another instance.
-    // In that case, we get an empty 200 back because webhook doesn't exist.
+
     throw new IntentFlow.HandlerError(
       request.requestId,
       "invalidRequest",
@@ -136,11 +154,18 @@ const identifyHandler = async (
     return createResponse(request, {} as any);
   }
 
-  return await forwardRequest(
-    findHassCustomDeviceData(request.requestId, request.devices),
-    "",
-    request
-  );
+  try {
+    return await forwardRequest(
+      findHassCustomDeviceData(request.requestId, request.devices),
+      "",
+      request
+    );
+  } catch (err) {
+    if (err instanceof UnknownInstance) {
+      return createResponse(request, {} as any);
+    }
+    throw err;
+  }
 };
 
 const reachableDevicesHandler = async (
@@ -153,7 +178,18 @@ const reachableDevicesHandler = async (
     request.devices
   );
 
-  return forwardRequest(hassCustomData, hassCustomData.proxyDeviceId, request);
+  try {
+    return forwardRequest(
+      hassCustomData,
+      hassCustomData.proxyDeviceId,
+      request
+    );
+  } catch (err) {
+    if (err instanceof UnknownInstance) {
+      err.throwHandlerError();
+    }
+    throw err;
+  }
 };
 
 const executeHandler = async (
@@ -161,14 +197,21 @@ const executeHandler = async (
 ): Promise<IntentFlow.ExecuteResponse> => {
   console.log("EXECUTE intent: " + JSON.stringify(request, null, 2));
 
-  return forwardRequest(
-    findHassCustomDeviceData(
-      request.requestId,
-      request.inputs[0].payload.commands[0].devices
-    ),
-    request.inputs[0].payload.commands[0].devices[0].id,
-    request
-  );
+  try {
+    return forwardRequest(
+      findHassCustomDeviceData(
+        request.requestId,
+        request.inputs[0].payload.commands[0].devices
+      ),
+      request.inputs[0].payload.commands[0].devices[0].id,
+      request
+    );
+  } catch (err) {
+    if (err instanceof UnknownInstance) {
+      err.throwHandlerError();
+    }
+    throw err;
+  }
 };
 
 const app = new App("1.0.0");
