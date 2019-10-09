@@ -65,15 +65,11 @@ const forwardRequest = async (
   request: smarthome.IntentRequest
 ) => {
   const command = new DataFlow.HttpRequestData();
-  // @ts-ignore  bad typing
-  command.method = "POST";
-
+  command.method = Constants.HttpOperation.POST;
   command.requestId = request.requestId;
-
   command.deviceId = targetDeviceId;
   command.isSecure = hassDeviceData.httpSSL;
   command.port = hassDeviceData.httpPort;
-
   command.path = `/api/webhook/${hassDeviceData.webhookId}`;
   command.data = JSON.stringify(request);
   command.dataType = "application/json";

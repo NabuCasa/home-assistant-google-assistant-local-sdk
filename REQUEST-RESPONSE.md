@@ -313,3 +313,6 @@ To trigger this intent, tell Google "force local" before saying a command.
   "intent": "action.devices.EXECUTE"
 }
 ```
+
+- This message sometimes fails with `COMMAND_FAILED` - "HTTP device missing IP address."
+- We are continueing to receive `REACHABLE_DEVICES` intent and it keeps working.
