@@ -282,7 +282,8 @@ To trigger this intent, tell Google "force local" before saying a command.
 ```
 
 - The execute intent does not include our synchronized devices or our proxy device info. This is not a problem as we store all the necessary information in each device custom data.
-- This intent needs to be targeted at a device that is needs to execute the intent, not at the proxy device id. In this case `light.ceiling_lights`. It will still be sent to the proxy device.
+- This intent needs to be targeted at a device that is needs to execute the intent on. In this case `light.ceiling_lights`. It will still be sent to the proxy device.
+- If you set the target to the proxy device, you get the error "Did not recognize device id in command."
 
 ## EXECUTE response sent to Google
 
