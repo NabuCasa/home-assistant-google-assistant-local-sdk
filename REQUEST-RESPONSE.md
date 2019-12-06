@@ -224,21 +224,6 @@ app.onProxySelected(req => {
 });
 ```
 
-This empty response raises an error. From looking at the code, it looks like it expects a response like this:
-
-```ts
-{
-  device: {
-    id?: string;
-    verificationId?: string;
-  }
-}
-```
-
-It will return the device.id if `verificationId` is undefined. If `verificationId` is not undefined, it will look at the `devices` in the PROXY_SELECTED request. It will return the ID of the first device that includes `verificationId` as part of `otherDeviceIds`.
-
-I've not played with this yet and instead let it just fail. Doesn't seem to impact operations.
-
 ## EXECUTE intent received from Google
 
 To trigger this intent, tell Google "force local" before saying a command.
