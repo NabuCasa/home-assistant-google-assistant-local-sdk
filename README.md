@@ -35,3 +35,9 @@ Go to the [Google Actions console](https://console.actions.google.com/):
 2. Log in to Home Assistant Cloud
 3. Sync your entities with Google Assistant
 4. Restart Home Assistant to trigger identify requests to the local SDK
+
+## Resources
+
+- [Add local execution tutorial](https://developers.google.com/assistant/smarthome/develop/local)
+- [Local SDK types](https://github.com/actions-on-google/local-home-sdk)
+- [Sample app](https://github.com/actions-on-google/smart-home-local/tree/master/app)
