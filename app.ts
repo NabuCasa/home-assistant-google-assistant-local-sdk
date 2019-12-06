@@ -85,7 +85,7 @@ const forwardRequest = async (
       setTimeout(() => reject(-1), 10000);
       deviceManager
         .send(command)
-        .then(response => resolve(response as HttpResponseData), reject);
+        .then((response: any) => resolve(response as HttpResponseData), reject);
     });
     // resp = (await deviceManager.send(command)) as HttpResponseData;
     console.log(request.requestId, "Raw Response", resp);
@@ -133,16 +133,13 @@ const identifyHandler = async (
 
   const deviceToIdentify = request.inputs[0].payload.device;
 
-  if (
-    !deviceToIdentify.mdnsScanData ||
-    deviceToIdentify.mdnsScanData.additionals.length === 0
-  ) {
+  if (!deviceToIdentify.mdnsScanData) {
     console.error(request.requestId, "No usable mdns scan data");
     return createResponse(request, {} as any);
   }
 
   if (
-    !deviceToIdentify.mdnsScanData.additionals[0].name.endsWith(
+    !deviceToIdentify.mdnsScanData.serviceName.endsWith(
       "._home-assistant._tcp.local"
     )
   ) {
@@ -177,7 +174,12 @@ const reachableDevicesHandler = async (
   try {
     return forwardRequest(
       hassCustomData,
-      hassCustomData.proxyDeviceId,
+      // Old code would sent it to the proxy ID: hassCustomData.proxyDeviceId
+      // But tutorial claims otherwise, but maybe it is not for hub devices??
+      // https://developers.google.com/assistant/smarthome/develop/local#implement_the_execute_handler
+
+      // Sending it to the device that has to receive the command as per the tutorial
+      request.inputs[0].payload.device.id as string,
       request
     );
   } catch (err) {

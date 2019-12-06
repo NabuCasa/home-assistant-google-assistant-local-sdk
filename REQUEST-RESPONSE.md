@@ -4,41 +4,45 @@ These are the requests and responses we have received while integrating Home Ass
 
 For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are able to reach REACHABLE_DEVICES interaction, you will need to restart the Google Assistant device between each try.
 
+**Updated for Google Home v1.44 (preview released on December 4).**
+
 ## SYNC response sent to Google
 
 ```json
 {
+  "msgid": "a0ec2919-a883-492e-a38d-93b068b9c08a",
   "payload": {
-    "agentUserId": "6a04f0f7-6125-4356-a846-861df7e01497",
-    "devices": [
-      {
-        "attributes": {
-          "colorModel": "hsv",
-          "colorTemperatureRange": {
-            "temperatureMaxK": 6535,
-            "temperatureMinK": 2000
-          }
-        },
-        "customData": {
-          "httpPort": 8123,
-          "httpSSL": false,
-          "proxyDeviceId": "6a04f0f7-6125-4356-a846-861df7e01497",
-          "webhookId": "dde3b9800a905e886cc4d38e226a6e7e3f2a6993d2b9b9f63d13e42ee7de3219"
-        },
-        "id": "light.ceiling_lights",
-        "name": { "name": "Ceiling Lights" },
-        "otherDeviceIds": [{ "deviceId": "light.ceiling_lights" }],
-        "traits": [
-          "action.devices.traits.Brightness",
-          "action.devices.traits.OnOff",
-          "action.devices.traits.ColorSetting"
-        ],
-        "type": "action.devices.types.LIGHT",
-        "willReportState": true
-      }
-    ]
-  },
-  "requestId": "5429789129851561898"
+    "payload": {
+      "agentUserId": "19199de777b74d9fa7bf91f9a287e147",
+      "devices": [
+        {
+          "attributes": {
+            "colorModel": "hsv",
+            "colorTemperatureRange": {
+              "temperatureMaxK": 6535,
+              "temperatureMinK": 2000
+            }
+          },
+          "customData": {
+            "httpPort": 8123,
+            "httpSSL": false,
+            "webhookId": "ff284724789c7789d9f784765475df545227902f6c81e67f0f9254efc7cca30e"
+          },
+          "id": "light.ceiling_lights",
+          "name": { "name": "Ceiling Lights" },
+          "otherDeviceIds": [{ "deviceId": "light.ceiling_lights" }],
+          "traits": [
+            "action.devices.traits.Brightness",
+            "action.devices.traits.OnOff",
+            "action.devices.traits.ColorSetting"
+          ],
+          "type": "action.devices.types.LIGHT",
+          "willReportState": false
+        }
+      ]
+    },
+    "requestId": "14145511951361306028"
+  }
 }
 ```
 
@@ -49,26 +53,27 @@ For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are 
 
 ```json
 {
-  "requestId": "85205A56584454F8507E07639014A008",
+  "requestId": "55EB909FBFAAE72114FE8928C2B87267",
   "inputs": [
     {
       "intent": "action.devices.IDENTIFY",
       "payload": {
         "device": {
           "mdnsScanData": {
-            "additionals": [
-              {
-                "type": "TXT",
-                "class": "IN",
-                "name": "devhome._home-assistant._tcp.local",
-                "ttl": 4500,
-                "data": [
-                  "version=0.101.0.dev0",
-                  "base_url=http://192.168.1.101:8123",
-                  "requires_api_password=true"
-                ]
-              }
-            ]
+            "serviceName": "devhome._home-assistant._tcp.local",
+            "name": "devhome",
+            "type": "home-assistant",
+            "protocol": "tcp",
+            "data": [
+              "version=0.104.0.dev0",
+              "base_url=http://192.168.1.234:8123",
+              "requires_api_password=true"
+            ],
+            "txt": {
+              "version": "0.104.0.dev0",
+              "base_url": "http://192.168.1.234:8123",
+              "requires_api_password": "true"
+            }
           }
         },
         "structureData": {}
@@ -81,34 +86,31 @@ For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are 
       "customData": {
         "httpPort": 8123,
         "httpSSL": false,
-        "proxyDeviceId": "6a04f0f7-6125-4356-a846-861df7e01497",
-        "webhookId": "dde3b9800a905e886cc4d38e226a6e7e3f2a6993d2b9b9f63d13e42ee7de3219"
+        "webhookId": "ff284724789c7789d9f784765475df545227902f6c81e67f0f9254efc7cca30e"
       }
     }
   ]
 }
 ```
 
-- `additionals` contains our broadcasted data. We don't need it as we store all data as custom data on our synchronized devices.
+- `mdnsScanData` contains our broadcasted data. We don't need it as we store all data as custom data on our synchronized devices.
 - `devices` contains our synchronized devices.
-
-> Note: According to [the docs](https://developers.google.com/assistant/smarthome/reference/local/interfaces/smarthome.intentflow.mdnsscandata) `additionals` is typed as `Record[]`. Each record contains a `data` property with the type `string` per [the docs](https://developers.google.com/assistant/smarthome/reference/local/interfaces/smarthome.intentflow.record.html). We see that the local SDK provides us a data with type `string[]`.
 
 ## IDENTIFY response sent to Google
 
 ```json
-{
-  "requestId": "85205A56584454F8507E07639014A008",
+
+  "requestId": "55EB909FBFAAE72114FE8928C2B87267",
   "payload": {
     "device": {
-      "id": "6a04f0f7-6125-4356-a846-861df7e01497",
+      "id": "19199de777b74d9fa7bf91f9a287e147",
       "isLocalOnly": true,
       "isProxy": true,
       "deviceInfo": {
         "hwVersion": "UNKNOWN_HW_VERSION",
         "manufacturer": "Home Assistant",
         "model": "Home Assistant",
-        "swVersion": "0.101.0.dev0"
+        "swVersion": "0.104.0.dev0"
       }
     }
   },
@@ -124,17 +126,15 @@ For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are 
 
 ```json
 {
-  "requestId": "1AE52BEDD4C8CB4CB88D595216906541",
+  "requestId": "D1B0B8955639E2A634A94E6DDED0A6D9",
   "inputs": [
     {
       "intent": "action.devices.REACHABLE_DEVICES",
       "payload": {
         "device": {
-          "proxyDevice": {
-            "id": "6a04f0f7-6125-4356-a846-861df7e01497",
-            "customData": "{}",
-            "proxyData": "{}"
-          }
+          "id": "19199de777b74d9fa7bf91f9a287e147",
+          "customData": {},
+          "proxyData": {}
         },
         "structureData": {}
       }
@@ -146,12 +146,11 @@ For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are 
       "customData": {
         "httpPort": 8123,
         "httpSSL": false,
-        "proxyDeviceId": "6a04f0f7-6125-4356-a846-861df7e01497",
-        "webhookId": "dde3b9800a905e886cc4d38e226a6e7e3f2a6993d2b9b9f63d13e42ee7de3219"
+        "webhookId": "ff284724789c7789d9f784765475df545227902f6c81e67f0f9254efc7cca30e"
       }
     },
     {
-      "id": "6a04f0f7-6125-4356-a846-861df7e01497",
+      "id": "19199de777b74d9fa7bf91f9a287e147",
       "customData": {}
     }
   ]
@@ -159,16 +158,13 @@ For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are 
 ```
 
 - You will receive this intent every minute.
-- `proxyDevice` has `customData` and `proxyData` both set to the string `"{}"`. Probably a bug?
-  - According to [the docs](https://developers.google.com/assistant/smarthome/reference/local/interfaces/smarthome.intentflow.proxydevice.html), `customData` is set to the data provided in the `SYNC` response. Since Home Assistant is a proxy device, it is not part of the `SYNC` response and so unable to set custom data. I tried setting custom data in the identify response but that did not persist.
-  - `proxyData` is not documented in [the `ProxyDevice` docs](https://developers.google.com/assistant/smarthome/reference/local/interfaces/smarthome.intentflow.proxydevice.html).
-  - We don't need either as we store all the data we need in each device.
+- Our hub is now also part of devices.
 
 ## REACHABLE_DEVICES response sent to Google
 
 ```json
 {
-  "requestId": "DDC84B7A50BD8A11C3503E100E107BCA",
+  "requestId": "D1B0B8955639E2A634A94E6DDED0A6D9",
   "payload": {
     "devices": [
       {
@@ -180,22 +176,19 @@ For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are 
 }
 ```
 
-- Reference docs for `devices` is missing in [the docs](https://developers.google.com/assistant/smarthome/reference/local/interfaces/smarthome.intentflow.reachabledevicespayload) for Reachable devices response payload.
 - Payload based on [the tutorial](https://developers.google.com/assistant/smarthome/develop/local#support_devices_behind_a_hub)
-
-> Note: If you return verificationIDs that are not yet synchronized to Google, you get the error `Failed to match device [object Object] with cloud synced devices`.
 
 ## PROXY_SELECTED intent received from Google
 
 ```json
 {
-  "requestId": "C26A964BE6650D9B853D538141ED4966",
+  "requestId": "063354DA47A8398DDFFC6028C754F611",
   "inputs": [
     {
       "intent": "action.devices.PROXY_SELECTED",
       "payload": {
         "device": {
-          "id": "6a04f0f7-6125-4356-a846-861df7e01497",
+          "id": "19199de777b74d9fa7bf91f9a287e147",
           "customData": {}
         },
         "structureData": {}
@@ -208,12 +201,11 @@ For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are 
       "customData": {
         "httpPort": 8123,
         "httpSSL": false,
-        "proxyDeviceId": "6a04f0f7-6125-4356-a846-861df7e01497",
-        "webhookId": "dde3b9800a905e886cc4d38e226a6e7e3f2a6993d2b9b9f63d13e42ee7de3219"
+        "webhookId": "ff284724789c7789d9f784765475df545227902f6c81e67f0f9254efc7cca30e"
       }
     },
     {
-      "id": "6a04f0f7-6125-4356-a846-861df7e01497",
+      "id": "19199de777b74d9fa7bf91f9a287e147",
       "customData": {}
     }
   ]
@@ -221,10 +213,6 @@ For testing, do a zeroconf broadcast to start the IDENTIFY intent. Once you are 
 ```
 
 > Receiving this intent is undocumented behavior.
-
-The following error is raised, regardless if `REACHABLE_DEVICES` is implemented.
-
-> [smarthome.DeviceManager] Handler for PROXY_SELECTED not implemented
 
 This is also [issue #1](https://github.com/actions-on-google/smart-home-local/issues/1) for smart-home-local on GitHub.
 
@@ -257,8 +245,7 @@ To trigger this intent, tell Google "force local" before saying a command.
                 "customData": {
                   "httpPort": 8123,
                   "httpSSL": false,
-                  "proxyDeviceId": "6a04f0f7-6125-4356-a846-861df7e01497",
-                  "webhookId": "dde3b9800a905e886cc4d38e226a6e7e3f2a6993d2b9b9f63d13e42ee7de3219"
+                  "webhookId": "ff284724789c7789d9f784765475df545227902f6c81e67f0f9254efc7cca30e"
                 },
                 "id": "light.ceiling_lights"
               }
@@ -277,19 +264,15 @@ To trigger this intent, tell Google "force local" before saying a command.
       }
     }
   ],
-  "requestId": "3166128787024955651"
+  "requestId": "3055233711694216560"
 }
 ```
-
-- The execute intent does not include our synchronized devices or our proxy device info. This is not a problem as we store all the necessary information in each device custom data.
-- This intent needs to be targeted at a device that is needs to execute the intent on. In this case `light.ceiling_lights`. It will still be sent to the proxy device.
-- If you set the target to the proxy device, you get the error "Did not recognize device id in command."
 
 ## EXECUTE response sent to Google
 
 ```json
 {
-  "requestId": "3166128787024955651",
+  "requestId": "3055233711694216560",
   "payload": {
     "commands": [
       {
@@ -314,6 +297,3 @@ To trigger this intent, tell Google "force local" before saying a command.
   "intent": "action.devices.EXECUTE"
 }
 ```
-
-- This message sometimes fails with `COMMAND_FAILED` - "HTTP device missing IP address."
-- We are continueing to receive `REACHABLE_DEVICES` intent and it keeps working.
