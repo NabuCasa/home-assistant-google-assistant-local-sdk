@@ -11,11 +11,29 @@ import HttpResponseData = smarthome.DataFlow.HttpResponseData;
 
 const findHassCustomDeviceData = (
   requestId: string,
-  devices: Array<{ customData?: unknown }>
+  devices: Array<{ customData?: unknown }>,
+  baseUrl?: string,
+  deviceId?: string
 ) => {
-  const device = devices.find(
-    dev => dev.customData && "webhookId" in (dev.customData as object)
+  let device;
+  device = devices.find(
+    (dev) =>
+      dev.customData &&
+      "webhookId" in (dev.customData as object) &&
+      (!baseUrl ||
+        (dev.customData as HassCustomDeviceData).baseUrl === baseUrl) &&
+      (!deviceId ||
+        (dev.customData as HassCustomDeviceData).proxyDeviceId === deviceId)
   );
+
+  // backwards compatibility for HA < 0.109
+  if (!device) {
+    device = devices.find(
+      (dev) =>
+        dev.customData &&
+        "webhookId" in (dev.customData as object)
+    );  
+  }
 
   if (!device) {
     console.log(requestId, "Unable to find HASS connection info.", devices);
@@ -35,13 +53,14 @@ const createResponse = (
 ): any => ({
   intent: request.inputs[0].intent,
   requestId: request.requestId,
-  payload
+  payload,
 });
 
 interface HassCustomDeviceData {
   webhookId: string;
   httpPort: number;
   httpSSL: boolean;
+  baseUrl: string;
   proxyDeviceId: string;
 }
 
@@ -109,11 +128,7 @@ const forwardRequest = async (
     // Local SDK wants this.
     response.intent = request.inputs[0].intent;
 
-    console.log(
-      request.requestId,
-      "Response",
-      JSON.stringify(response, null, 2)
-    );
+    console.log(request.requestId, "Response", response);
     return response;
   } catch (err) {
     console.error(request.requestId, "Error parsing body", err);
@@ -129,7 +144,7 @@ const forwardRequest = async (
 const identifyHandler = async (
   request: IntentFlow.IdentifyRequest
 ): Promise<IntentFlow.IdentifyResponse> => {
-  console.log("IDENTIFY intent: " + JSON.stringify(request, null, 2));
+  console.log("IDENTIFY intent:", request);
 
   const deviceToIdentify = request.inputs[0].payload.device;
 
@@ -149,7 +164,11 @@ const identifyHandler = async (
 
   try {
     return await forwardRequest(
-      findHassCustomDeviceData(request.requestId, request.devices),
+      findHassCustomDeviceData(
+        request.requestId,
+        request.devices,
+        deviceToIdentify.mdnsScanData.txt.base_url
+      ),
       "",
       request
     );
@@ -164,11 +183,13 @@ const identifyHandler = async (
 const reachableDevicesHandler = async (
   request: IntentFlow.ReachableDevicesRequest
 ): Promise<IntentFlow.ReachableDevicesResponse> => {
-  console.log("REACHABLE_DEVICES intent: " + JSON.stringify(request, null, 2));
+  console.log("REACHABLE_DEVICES intent:", request);
 
   const hassCustomData = findHassCustomDeviceData(
     request.requestId,
-    request.devices
+    request.devices,
+    undefined,
+    request.inputs[0].payload.device.id
   );
 
   try {
@@ -193,7 +214,7 @@ const reachableDevicesHandler = async (
 const executeHandler = async (
   request: IntentFlow.ExecuteRequest
 ): Promise<IntentFlow.ExecuteResponse> => {
-  console.log("EXECUTE intent: " + JSON.stringify(request, null, 2));
+  console.log("EXECUTE intent:", request);
 
   try {
     return forwardRequest(
@@ -224,29 +245,25 @@ app
   // Suggested by Googler, seems to work :shrug:
   // https://github.com/actions-on-google/smart-home-local/issues/1#issuecomment-515706997
   // @ts-ignore
-  .onProxySelected(req => {
-    console.log("ProxySelected", JSON.stringify(req, null, 2));
+  .onProxySelected((req) => {
+    console.log("ProxySelected", req);
     return createResponse(req, {} as any);
   })
 
   // @ts-ignore
-  .onIndicate(req => console.log("Indicate", JSON.stringify(req, null, 2)))
+  .onIndicate((req) => console.log("Indicate", req))
   // @ts-ignore
-  .onParseNotification(req =>
-    console.log("ParseNotification", JSON.stringify(req, null, 2))
-  )
+  .onParseNotification((req) => console.log("ParseNotification", req))
   // @ts-ignore
-  .onProvision(req => console.log("Provision", JSON.stringify(req, null, 2)))
+  .onProvision((req) => console.log("Provision", req))
   // @ts-ignore
-  .onQuery(req => console.log("Query", JSON.stringify(req, null, 2)))
+  .onQuery((req) => console.log("Query", req))
   // @ts-ignore
-  .onRegister(req => console.log("Register", JSON.stringify(req, null, 2)))
+  .onRegister((req) => console.log("Register", req))
   // @ts-ignore
-  .onUnprovision(req =>
-    console.log("Unprovision", JSON.stringify(req, null, 2))
-  )
+  .onUnprovision((req) => console.log("Unprovision", req))
   // @ts-ignore
-  .onUpdate(req => console.log("Update", JSON.stringify(req, null, 2)))
+  .onUpdate((req) => console.log("Update", req))
 
   .listen()
   .then(() => {
