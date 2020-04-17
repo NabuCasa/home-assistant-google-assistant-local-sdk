@@ -12,8 +12,8 @@
   "author": "",
   "license": "GPL-3.0",
   "devDependencies": {
-    "@google/local-home-sdk": "^0.2.0",
+    "@google/local-home-sdk": "^1.0.0",
     "http-server": "^0.12.0",
-    "typescript": "^3.7.3"
+    "typescript": "^3.8.3"
   }
 }
