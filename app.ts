@@ -9,31 +9,57 @@ import Intents = smarthome.Intents;
 import IntentFlow = smarthome.IntentFlow;
 import HttpResponseData = smarthome.DataFlow.HttpResponseData;
 
-const findHassCustomDeviceData = (
+const findHassCustomDeviceDataByMdnsData = (
   requestId: string,
   devices: Array<{ customData?: unknown }>,
-  baseUrl?: string,
-  deviceId?: string
+  mdnsScanData: { [key: string]: string }
 ) => {
   let device;
-  device = devices.find(
-    (dev) =>
-      dev.customData &&
-      "webhookId" in (dev.customData as object) &&
-      (!baseUrl ||
-        (dev.customData as HassCustomDeviceData).baseUrl === baseUrl) &&
-      (!deviceId ||
-        (dev.customData as HassCustomDeviceData).proxyDeviceId === deviceId)
-  );
+  device = devices.find((dev) => {
+    const customData = dev.customData as HassCustomDeviceData;
+    return (
+      customData &&
+      "webhookId" in customData &&
+      (!mdnsScanData.uuid || customData.uuid === mdnsScanData.uuid) &&
+      (!mdnsScanData.baseUrl || customData.baseUrl === mdnsScanData.baseUrl)
+    );
+  });
 
   // backwards compatibility for HA < 0.109
   if (!device) {
     device = devices.find(
       (dev) =>
         dev.customData &&
-        "webhookId" in (dev.customData as object)
-    );  
+        "webhookId" in (dev.customData as HassCustomDeviceData)
+    );
   }
+
+  if (!device) {
+    console.log(requestId, "Unable to find HASS connection info.", devices);
+    throw new IntentFlow.HandlerError(
+      requestId,
+      "invalidRequest",
+      "Unable to find HASS connection info."
+    );
+  }
+
+  return device.customData as HassCustomDeviceData;
+};
+
+const findHassCustomDeviceDataByDeviceId = (
+  requestId: string,
+  devices: Array<{ customData?: unknown }>,
+  deviceId?: string
+) => {
+  let device;
+  device = devices.find((dev) => {
+    const customData = dev.customData as HassCustomDeviceData;
+    return (
+      customData &&
+      "webhookId" in customData &&
+      customData.proxyDeviceId === deviceId
+    );
+  });
 
   if (!device) {
     console.log(requestId, "Unable to find HASS connection info.", devices);
@@ -60,7 +86,8 @@ interface HassCustomDeviceData {
   webhookId: string;
   httpPort: number;
   httpSSL: boolean;
-  baseUrl: string;
+  baseUrl?: string;
+  uuid?: string;
   proxyDeviceId: string;
 }
 
@@ -163,15 +190,12 @@ const identifyHandler = async (
   }
 
   try {
-    return await forwardRequest(
-      findHassCustomDeviceData(
-        request.requestId,
-        request.devices,
-        deviceToIdentify.mdnsScanData.txt.base_url
-      ),
-      "",
-      request
+    const hassCustomData = findHassCustomDeviceDataByMdnsData(
+      request.requestId,
+      request.devices,
+      deviceToIdentify.mdnsScanData.txt
     );
+    return await forwardRequest(hassCustomData, "", request);
   } catch (err) {
     if (err instanceof UnknownInstance) {
       return createResponse(request, {} as any);
@@ -185,10 +209,9 @@ const reachableDevicesHandler = async (
 ): Promise<IntentFlow.ReachableDevicesResponse> => {
   console.log("REACHABLE_DEVICES intent:", request);
 
-  const hassCustomData = findHassCustomDeviceData(
+  const hassCustomData = findHassCustomDeviceDataByDeviceId(
     request.requestId,
     request.devices,
-    undefined,
     request.inputs[0].payload.device.id
   );
 
@@ -216,13 +239,12 @@ const executeHandler = async (
 ): Promise<IntentFlow.ExecuteResponse> => {
   console.log("EXECUTE intent:", request);
 
+  const device = request.inputs[0].payload.commands[0].devices[0];
+
   try {
     return forwardRequest(
-      findHassCustomDeviceData(
-        request.requestId,
-        request.inputs[0].payload.commands[0].devices
-      ),
-      request.inputs[0].payload.commands[0].devices[0].id,
+      device.customData as HassCustomDeviceData,
+      device.id,
       request
     );
   } catch (err) {
