@@ -20,19 +20,9 @@ const findHassCustomDeviceDataByMdnsData = (
     return (
       customData &&
       "webhookId" in customData &&
-      (!mdnsScanData.uuid || customData.uuid === mdnsScanData.uuid) &&
-      (!mdnsScanData.baseUrl || customData.baseUrl === mdnsScanData.baseUrl)
+      (!mdnsScanData.uuid || customData.uuid === mdnsScanData.uuid)
     );
   });
-
-  // backwards compatibility for HA < 0.109
-  if (!device) {
-    device = devices.find(
-      (dev) =>
-        dev.customData &&
-        "webhookId" in (dev.customData as HassCustomDeviceData)
-    );
-  }
 
   if (!device) {
     console.log(requestId, "Unable to find HASS connection info.", devices);
@@ -85,8 +75,6 @@ const createResponse = (
 interface HassCustomDeviceData {
   webhookId: string;
   httpPort: number;
-  httpSSL: boolean;
-  baseUrl?: string;
   uuid?: string;
   proxyDeviceId: string;
 }
@@ -114,7 +102,6 @@ const forwardRequest = async (
   command.method = Constants.HttpOperation.POST;
   command.requestId = request.requestId;
   command.deviceId = targetDeviceId;
-  command.isSecure = hassDeviceData.httpSSL;
   command.port = hassDeviceData.httpPort;
   command.path = `/api/webhook/${hassDeviceData.webhookId}`;
   command.data = JSON.stringify(request);
