@@ -8,27 +8,91 @@ import Intents = smarthome.Intents;
 
 import IntentFlow = smarthome.IntentFlow;
 import HttpResponseData = smarthome.DataFlow.HttpResponseData;
+import ErrorCode = IntentFlow.ErrorCode;
 
-const findHassCustomDeviceDataByMdnsData = (
+type Requests = {
+  query: {
+    request: IntentFlow.QueryRequest;
+    response: IntentFlow.QueryResponse;
+  };
+  execute: {
+    request: IntentFlow.ExecuteRequest;
+    response: IntentFlow.ExecuteResponse;
+  };
+  identify: {
+    request: IntentFlow.IdentifyRequest;
+    response: IntentFlow.IdentifyResponse;
+  };
+  reachableDevices: {
+    request: IntentFlow.ReachableDevicesRequest;
+    response: IntentFlow.ReachableDevicesResponse;
+  };
+  indicate: {
+    request: IntentFlow.IndicateRequest;
+    response: IntentFlow.IndicateResponse;
+  };
+  proxySelected: {
+    request: IntentFlow.ProxySelectedRequest;
+    response: IntentFlow.ProxySelectedResponse;
+  };
+  parseNotification: {
+    request: IntentFlow.ParseNotificationRequest;
+    response: IntentFlow.ParseNotificationResponse;
+  };
+  Provision: {
+    request: IntentFlow.ProvisionRequest;
+    response: IntentFlow.ProvisionResponse;
+  };
+  register: {
+    request: IntentFlow.RegisterRequest;
+    response: IntentFlow.RegisterResponse;
+  };
+  unprovision: {
+    request: IntentFlow.UnprovisionRequest;
+    response: IntentFlow.UnprovisionResponse;
+  };
+  update: {
+    request: IntentFlow.UpdateRequest;
+    response: IntentFlow.UpdateResponse;
+  };
+};
+
+interface HassCustomDeviceData {
+  webhookId: string;
+  httpPort: number;
+  uuid?: string;
+  proxyDeviceId: string;
+}
+
+interface DeviceDataForRequesting {
+  customData: HassCustomDeviceData;
+  id: string;
+}
+
+const findDeviceCustomDataByMdnsData = async (
   requestId: string,
-  devices: Array<{ customData?: unknown }>,
   mdnsScanData: { [key: string]: string }
-) => {
-  let device;
-  device = devices.find((dev) => {
+): Promise<HassCustomDeviceData> => {
+  const deviceManager = await app.getDeviceManager();
+  const device = deviceManager.getRegisteredDevices().find((dev) => {
     const customData = dev.customData as HassCustomDeviceData;
     return (
       customData &&
       "webhookId" in customData &&
+      // UUID was introduced in Home Assistant 0.109
       (!mdnsScanData.uuid || customData.uuid === mdnsScanData.uuid)
     );
   });
 
   if (!device) {
-    console.log(requestId, "Unable to find HASS connection info.", devices);
+    console.log(
+      requestId,
+      "Unable to find HASS connection info.",
+      deviceManager.getRegisteredDevices()
+    );
     throw new IntentFlow.HandlerError(
       requestId,
-      "invalidRequest",
+      ErrorCode.DEVICE_NOT_IDENTIFIED,
       "Unable to find HASS connection info."
     );
   }
@@ -36,31 +100,86 @@ const findHassCustomDeviceDataByMdnsData = (
   return device.customData as HassCustomDeviceData;
 };
 
-const findHassCustomDeviceDataByDeviceId = (
+const getProxyDeviceDataForRequesting = async (
   requestId: string,
-  devices: Array<{ customData?: unknown }>,
-  deviceId?: string
-) => {
-  let device;
-  device = devices.find((dev) => {
+  proxyDeviceId: string
+): Promise<DeviceDataForRequesting> => {
+  const deviceManager = await app.getDeviceManager();
+  const device = deviceManager.getRegisteredDevices().find((dev) => {
     const customData = dev.customData as HassCustomDeviceData;
     return (
       customData &&
       "webhookId" in customData &&
-      customData.proxyDeviceId === deviceId
+      customData.proxyDeviceId === proxyDeviceId
     );
   });
 
   if (!device) {
-    console.log(requestId, "Unable to find HASS connection info.", devices);
+    console.log(
+      requestId,
+      "Unable to find HASS connection info.",
+      deviceManager.getRegisteredDevices()
+    );
     throw new IntentFlow.HandlerError(
       requestId,
-      "invalidRequest",
+      ErrorCode.DEVICE_VERIFICATION_FAILED,
       "Unable to find HASS connection info."
     );
   }
 
-  return device.customData as HassCustomDeviceData;
+  return {
+    customData: device.customData as HassCustomDeviceData,
+    id: proxyDeviceId,
+  };
+};
+
+// The types are wrong. The registered proxy device (HA) includes unparsed mdns props.
+interface RegisteredDeviceMdnsScanData extends IntentFlow.MdnsScanData {
+  texts: string[];
+}
+
+const extractVersionFromMdnsRecords = (texts: string[]) => {
+  for (const text of texts) {
+    if (text.startsWith("version=")) {
+      return text.split("=")[1];
+    }
+  }
+};
+
+const getHAVersion = async (): Promise<string | undefined> => {
+  const deviceManager = await app.getDeviceManager();
+  const proxyDevice = deviceManager
+    .getRegisteredDevices()
+    .find(
+      (dev) =>
+        (dev.scanData?.mdnsScanData as RegisteredDeviceMdnsScanData)?.texts
+    );
+  if (!proxyDevice) {
+    return;
+  }
+  return extractVersionFromMdnsRecords(
+    (proxyDevice.scanData!.mdnsScanData as RegisteredDeviceMdnsScanData).texts
+  );
+};
+
+const atleastVersion = (haVersion: string, major: number, minor: number) => {
+  const parts = haVersion.split(".");
+  if (parts.length < 2) {
+    return false;
+  }
+  let numbers: number[];
+  try {
+    numbers = [parseInt(parts[0]), parseInt(parts[1])];
+  } catch (err) {
+    return false;
+  }
+  return (
+    parts.length > 2 &&
+    // If major version is higher
+    (numbers[0] > major ||
+      // same major, higher or equal minor
+      (numbers[0] == major && numbers[1] >= minor))
+  );
 };
 
 const createResponse = (
@@ -72,68 +191,74 @@ const createResponse = (
   payload,
 });
 
-interface HassCustomDeviceData {
-  webhookId: string;
-  httpPort: number;
-  uuid?: string;
-  proxyDeviceId: string;
-}
+const forwardRequest = async <T extends keyof Requests>(
+  request: Requests[T]["request"],
+  extractDeviceData: (
+    request: Requests[T]["request"]
+  ) => Promise<DeviceDataForRequesting>,
+  suppportedVersion?: [number, number]
+): Promise<Requests[T]["response"]> => {
+  // Return empty response if not supported.
+  const intent = request.inputs[0].intent;
+  const haVersion =
+    intent == Intents.IDENTIFY
+      ? extractVersionFromMdnsRecords(
+          (request as IntentFlow.IdentifyRequest).inputs[0].payload.device
+            .mdnsScanData?.data || []
+        )
+      : await getHAVersion();
+  console.log(`Sending ${intent} to HA ${haVersion}`, request);
 
-class UnknownInstance extends Error {
-  constructor(public requestId: string) {
-    super();
+  if (suppportedVersion) {
+    if (
+      !haVersion ||
+      !atleastVersion(haVersion, suppportedVersion[0], suppportedVersion[1])
+    ) {
+      console.log(
+        "Not supported. Returning empty response",
+        createResponse(request, {} as any)
+      );
+      return createResponse(request, {} as any);
+    }
   }
 
-  throwHandlerError() {
-    throw new IntentFlow.HandlerError(
-      this.requestId,
-      "invalidRequest",
-      "Unknown Instance"
-    );
-  }
-}
+  const data = await extractDeviceData(request);
 
-const forwardRequest = async (
-  hassDeviceData: HassCustomDeviceData,
-  targetDeviceId: string,
-  request: smarthome.IntentRequest
-) => {
   const command = new DataFlow.HttpRequestData();
   command.method = Constants.HttpOperation.POST;
   command.requestId = request.requestId;
-  command.deviceId = targetDeviceId;
-  command.port = hassDeviceData.httpPort;
-  command.path = `/api/webhook/${hassDeviceData.webhookId}`;
+  command.deviceId = data.id;
+  command.port = data.customData.httpPort;
+  command.path = `/api/webhook/${data.customData.webhookId}`;
   command.data = JSON.stringify(request);
   command.dataType = "application/json";
 
-  console.log(request.requestId, "Sending", command);
+  // console.log(request.requestId, "Sending", command);
 
   const deviceManager = await app.getDeviceManager();
 
   let resp: HttpResponseData;
 
   try {
-    resp = await new Promise<HttpResponseData>((resolve, reject) => {
-      setTimeout(() => reject(-1), 10000);
-      deviceManager
-        .send(command)
-        .then((response: any) => resolve(response as HttpResponseData), reject);
-    });
-    // resp = (await deviceManager.send(command)) as HttpResponseData;
-    console.log(request.requestId, "Raw Response", resp);
+    resp = (await deviceManager.send(command)) as HttpResponseData;
+    // console.log(request.requestId, "Raw Response", resp);
   } catch (err) {
     console.error(request.requestId, "Error making request", err);
     throw new IntentFlow.HandlerError(
       request.requestId,
-      "invalidRequest",
-      err === -1 ? "Timeout" : err.message
+      ErrorCode.GENERIC_ERROR,
+      (err as any).message || "uknown error"
     );
   }
 
   // Response if the webhook is not registered.
   if (resp.httpResponse.statusCode === 200 && !resp.httpResponse.body) {
-    throw new UnknownInstance(request.requestId);
+    console.log("Webhook not registered");
+    throw new IntentFlow.HandlerError(
+      request.requestId,
+      ErrorCode.DEVICE_NOT_IDENTIFIED,
+      "Unknown Instance"
+    );
   }
 
   try {
@@ -149,135 +274,86 @@ const forwardRequest = async (
 
     throw new IntentFlow.HandlerError(
       request.requestId,
-      "invalidRequest",
-      err.message
+      ErrorCode.GENERIC_ERROR,
+      (err as any).message || "unknown error"
     );
   }
 };
 
-const identifyHandler = async (
-  request: IntentFlow.IdentifyRequest
-): Promise<IntentFlow.IdentifyResponse> => {
-  console.log("IDENTIFY intent:", request);
-
-  const deviceToIdentify = request.inputs[0].payload.device;
-
-  if (!deviceToIdentify.mdnsScanData) {
-    console.error(request.requestId, "No usable mdns scan data");
-    return createResponse(request, {} as any);
-  }
-
-  if (
-    !deviceToIdentify.mdnsScanData.serviceName.endsWith(
-      "._home-assistant._tcp.local"
-    )
-  ) {
-    console.error(request.requestId, "Not Home Assistant type");
-    return createResponse(request, {} as any);
-  }
-
-  try {
-    const hassCustomData = findHassCustomDeviceDataByMdnsData(
-      request.requestId,
-      request.devices,
-      deviceToIdentify.mdnsScanData.txt
-    );
-    return await forwardRequest(hassCustomData, "", request);
-  } catch (err) {
-    if (err instanceof UnknownInstance) {
-      return createResponse(request, {} as any);
-    }
-    throw err;
-  }
-};
-
-const reachableDevicesHandler = async (
-  request: IntentFlow.ReachableDevicesRequest
-): Promise<IntentFlow.ReachableDevicesResponse> => {
-  console.log("REACHABLE_DEVICES intent:", request);
-
-  const hassCustomData = findHassCustomDeviceDataByDeviceId(
-    request.requestId,
-    request.devices,
-    request.inputs[0].payload.device.id
-  );
-
-  try {
-    return forwardRequest(
-      hassCustomData,
-      // Old code would sent it to the proxy ID: hassCustomData.proxyDeviceId
-      // But tutorial claims otherwise, but maybe it is not for hub devices??
-      // https://developers.google.com/assistant/smarthome/develop/local#implement_the_execute_handler
-
-      // Sending it to the device that has to receive the command as per the tutorial
-      request.inputs[0].payload.device.id as string,
-      request
-    );
-  } catch (err) {
-    if (err instanceof UnknownInstance) {
-      err.throwHandlerError();
-    }
-    throw err;
-  }
-};
-
-const executeHandler = async (
-  request: IntentFlow.ExecuteRequest
-): Promise<IntentFlow.ExecuteResponse> => {
-  console.log("EXECUTE intent:", request);
-
-  const device = request.inputs[0].payload.commands[0].devices[0];
-
-  try {
-    return forwardRequest(
-      device.customData as HassCustomDeviceData,
-      device.id,
-      request
-    );
-  } catch (err) {
-    if (err instanceof UnknownInstance) {
-      err.throwHandlerError();
-    }
-    throw err;
-  }
-};
-
-const app = new App("1.0.0");
+const app = new App("2.0.0");
 
 app
-  .onIdentify(identifyHandler)
-  .onReachableDevices(reachableDevicesHandler)
-  .onExecute(executeHandler)
+  .onIdentify((request) =>
+    forwardRequest<"identify">(request, async (request) => {
+      const deviceToIdentify = request.inputs[0].payload.device;
 
-  // Undocumented in TypeScript
+      if (!deviceToIdentify.mdnsScanData) {
+        console.error(request.requestId, "No usable mdns scan data");
+        throw new IntentFlow.HandlerError(
+          request.requestId,
+          ErrorCode.DEVICE_NOT_IDENTIFIED,
+          "Unknown Instance"
+        );
+      }
 
-  // Suggested by Googler, seems to work :shrug:
-  // https://github.com/actions-on-google/smart-home-local/issues/1#issuecomment-515706997
-  // @ts-ignore
-  .onProxySelected((req) => {
-    console.log("ProxySelected", req);
-    return createResponse(req, {} as any);
-  })
+      if (
+        !deviceToIdentify.mdnsScanData.serviceName.endsWith(
+          "._home-assistant._tcp.local"
+        )
+      ) {
+        console.error(request.requestId, "Not Home Assistant type");
+        throw new IntentFlow.HandlerError(
+          request.requestId,
+          ErrorCode.DEVICE_NOT_IDENTIFIED,
+          "Unknown Instance"
+        );
+      }
 
-  // @ts-ignore
-  .onIndicate((req) => console.log("Indicate", req))
-  // @ts-ignore
-  .onParseNotification((req) => console.log("ParseNotification", req))
-  // @ts-ignore
-  .onProvision((req) => console.log("Provision", req))
-  // @ts-ignore
-  .onQuery((req) => console.log("Query", req))
-  // @ts-ignore
-  .onRegister((req) => console.log("Register", req))
-  // @ts-ignore
-  .onUnprovision((req) => console.log("Unprovision", req))
-  // @ts-ignore
-  .onUpdate((req) => console.log("Update", req))
-
+      return {
+        customData: await findDeviceCustomDataByMdnsData(
+          request.requestId,
+          deviceToIdentify.mdnsScanData.txt
+        ),
+        id: "",
+      };
+    })
+  )
+  .onProxySelected((request) =>
+    forwardRequest<"proxySelected">(
+      request,
+      (request) =>
+        getProxyDeviceDataForRequesting(
+          request.requestId,
+          request.inputs[0].payload.device.id!
+        ),
+      [2022, 3]
+    )
+  )
+  .onReachableDevices((request) =>
+    forwardRequest<"reachableDevices">(request, async (request) =>
+      getProxyDeviceDataForRequesting(
+        request.requestId,
+        request.inputs[0].payload.device.id!
+      )
+    )
+  )
+  .onQuery((request) =>
+    forwardRequest<"query">(
+      request,
+      async (request) =>
+        request.inputs[0].payload.devices[0] as DeviceDataForRequesting
+    )
+  )
+  .onExecute((request) =>
+    forwardRequest<"execute">(
+      request,
+      async (request) =>
+        request.inputs[0].payload.commands[0]
+          .devices[0] as DeviceDataForRequesting
+    )
+  )
   .listen()
   .then(() => {
     console.log("Ready!");
-    // Play audio to indicate that receiver is ready to inspect.
-    new Audio("https://www.pacdv.com/sounds/fart-sounds/fart-1.wav").play();
   })
   .catch((e: Error) => console.error(e));

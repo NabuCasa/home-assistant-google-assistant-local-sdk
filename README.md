@@ -11,11 +11,12 @@ Implements a small Local SDK receiver that can interact with Home Assistant inst
 
 Go to the [Google Actions console](https://console.actions.google.com/):
 
-- Develop (top bar) -> Actions (sidebar) -> Configure local home SDK:
-  - Add configuration:
-    - MDNS service name: `_home-assistant._tcp.local`
-- Test (top bar) -> On device testing (sidebar):
-  - Development server URL: `http://<YOUR LOCAL IP>:8080/test_receiver.html`
+- Develop (top bar) -> Actions (sidebar) -> Configure local home SDK::
+  - Enter your testing URL for Chrome: `http://<YOUR LOCAL IP>:8080/test_receiver.html`
+  - Enter your testing URL for Node: `http://<YOUR LOCAL IP>:8080/test_receiver.html`
+  - Enable "Support local query"
+  - Add device scan configuration: "MDNS"
+  - MDNS service name: `_home-assistant._tcp.local`
 
 ## Local SDK dev env
 
