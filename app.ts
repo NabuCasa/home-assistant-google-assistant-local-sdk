@@ -69,6 +69,8 @@ interface DeviceDataForRequesting {
   id: string;
 }
 
+const VERSION = "2.1.0";
+
 const findDeviceCustomDataByMdnsData = async (
   requestId: string,
   mdnsScanData: { [key: string]: string }
@@ -198,7 +200,6 @@ const forwardRequest = async <T extends keyof Requests>(
   ) => Promise<DeviceDataForRequesting>,
   suppportedVersion?: [number, number]
 ): Promise<Requests[T]["response"]> => {
-  // Return empty response if not supported.
   const intent = request.inputs[0].intent;
   const haVersion =
     intent == Intents.IDENTIFY
@@ -232,6 +233,9 @@ const forwardRequest = async <T extends keyof Requests>(
   command.path = `/api/webhook/${data.customData.webhookId}`;
   command.data = JSON.stringify(request);
   command.dataType = "application/json";
+  command.additionalHeaders = {
+    "HA-Cloud-Version": VERSION,
+  };
 
   // console.log(request.requestId, "Sending", command);
 
@@ -280,7 +284,7 @@ const forwardRequest = async <T extends keyof Requests>(
   }
 };
 
-const app = new App("2.0.0");
+const app = new App(VERSION);
 
 app
   .onIdentify((request) =>
