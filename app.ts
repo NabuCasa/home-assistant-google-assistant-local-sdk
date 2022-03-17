@@ -69,69 +69,83 @@ interface DeviceDataForRequesting {
   id: string;
 }
 
-const VERSION = "2.1.0";
+const VERSION = "2.1.1";
+
+const createError = (
+  requestId: string,
+  errorCode: string,
+  msg: string,
+  ...extraLog: any[]
+) => {
+  console.error(requestId, errorCode, msg, ...extraLog);
+  return new IntentFlow.HandlerError(requestId, errorCode, msg);
+};
+
+const getCustomDataByKey = async (
+  requestId: string,
+  dataKey: keyof HassCustomDeviceData,
+  expectedValue?: string
+) => {
+  const deviceManager = await app.getDeviceManager();
+  const KEY_NOT_DEFINED = "_no_key_";
+  const grouped: Record<string, HassCustomDeviceData> = {};
+
+  if (expectedValue === undefined) {
+    expectedValue = KEY_NOT_DEFINED;
+  }
+
+  // Group valid scan data by key
+  for (const device of deviceManager.getRegisteredDevices()) {
+    const customData = device.customData as HassCustomDeviceData;
+    if (!customData || !("webhookId" in customData)) {
+      continue;
+    }
+    const value = customData[dataKey] || KEY_NOT_DEFINED;
+    if (!(value in grouped)) {
+      grouped[value] = customData;
+    }
+  }
+
+  if (Object.keys(grouped).length === 0) {
+    throw createError(
+      requestId,
+      ErrorCode.DEVICE_VERIFICATION_FAILED,
+      "Unable to find HASS connection info.",
+      deviceManager.getRegisteredDevices()
+    );
+  }
+
+  if (!(expectedValue in grouped)) {
+    throw createError(
+      requestId,
+      ErrorCode.DEVICE_VERIFICATION_FAILED,
+      `Unable to find HA instance in sync-ed devices matching on ${dataKey}.`,
+      deviceManager.getRegisteredDevices()
+    );
+  }
+
+  return grouped[expectedValue];
+};
 
 const findDeviceCustomDataByMdnsData = async (
   requestId: string,
   mdnsScanData: { [key: string]: string }
 ): Promise<HassCustomDeviceData> => {
-  const deviceManager = await app.getDeviceManager();
-  const device = deviceManager.getRegisteredDevices().find((dev) => {
-    const customData = dev.customData as HassCustomDeviceData;
-    return (
-      customData &&
-      "webhookId" in customData &&
-      // UUID was introduced in Home Assistant 0.109
-      (!mdnsScanData.uuid || customData.uuid === mdnsScanData.uuid)
-    );
-  });
-
-  if (!device) {
-    console.log(
-      requestId,
-      "Unable to find HASS connection info.",
-      deviceManager.getRegisteredDevices()
-    );
-    throw new IntentFlow.HandlerError(
-      requestId,
-      ErrorCode.DEVICE_NOT_IDENTIFIED,
-      "Unable to find HASS connection info."
-    );
-  }
-
-  return device.customData as HassCustomDeviceData;
+  return await getCustomDataByKey(requestId, "uuid", mdnsScanData.uuid);
 };
 
 const getProxyDeviceDataForRequesting = async (
   requestId: string,
   proxyDeviceId: string
 ): Promise<DeviceDataForRequesting> => {
-  const deviceManager = await app.getDeviceManager();
-  const device = deviceManager.getRegisteredDevices().find((dev) => {
-    const customData = dev.customData as HassCustomDeviceData;
-    return (
-      customData &&
-      "webhookId" in customData &&
-      customData.proxyDeviceId === proxyDeviceId
-    );
-  });
-
-  if (!device) {
-    console.log(
-      requestId,
-      "Unable to find HASS connection info.",
-      deviceManager.getRegisteredDevices()
-    );
-    throw new IntentFlow.HandlerError(
-      requestId,
-      ErrorCode.DEVICE_VERIFICATION_FAILED,
-      "Unable to find HASS connection info."
-    );
-  }
-
+  const customData = await getCustomDataByKey(
+    requestId,
+    "proxyDeviceId",
+    proxyDeviceId
+  );
   return {
-    customData: device.customData as HassCustomDeviceData,
     id: proxyDeviceId,
+    customData,
   };
 };
 
@@ -169,18 +183,17 @@ const atleastVersion = (haVersion: string, major: number, minor: number) => {
   if (parts.length < 2) {
     return false;
   }
-  let numbers: number[];
+  let numbers: [number, number];
   try {
     numbers = [parseInt(parts[0]), parseInt(parts[1])];
   } catch (err) {
     return false;
   }
   return (
-    parts.length > 2 &&
     // If major version is higher
-    (numbers[0] > major ||
-      // same major, higher or equal minor
-      (numbers[0] == major && numbers[1] >= minor))
+    numbers[0] > major ||
+    // same major, higher or equal minor
+    (numbers[0] == major && numbers[1] >= minor)
   );
 };
 
@@ -195,7 +208,7 @@ const createResponse = (
 
 const forwardRequest = async <T extends keyof Requests>(
   request: Requests[T]["request"],
-  extractDeviceData: (
+  extractProxyDeviceData: (
     request: Requests[T]["request"]
   ) => Promise<DeviceDataForRequesting>,
   suppportedVersion?: [number, number]
@@ -216,21 +229,20 @@ const forwardRequest = async <T extends keyof Requests>(
       !atleastVersion(haVersion, suppportedVersion[0], suppportedVersion[1])
     ) {
       console.log(
-        "Not supported. Returning empty response",
-        createResponse(request, {} as any)
+        "Intent not supported by HA version. Returning empty response"
       );
       return createResponse(request, {} as any);
     }
   }
 
-  const data = await extractDeviceData(request);
+  const proxyDeviceData = await extractProxyDeviceData(request);
 
   const command = new DataFlow.HttpRequestData();
   command.method = Constants.HttpOperation.POST;
   command.requestId = request.requestId;
-  command.deviceId = data.id;
-  command.port = data.customData.httpPort;
-  command.path = `/api/webhook/${data.customData.webhookId}`;
+  command.deviceId = proxyDeviceData.id;
+  command.port = proxyDeviceData.customData.httpPort;
+  command.path = `/api/webhook/${proxyDeviceData.customData.webhookId}`;
   command.data = JSON.stringify(request);
   command.dataType = "application/json";
   command.additionalHeaders = {
@@ -245,43 +257,41 @@ const forwardRequest = async <T extends keyof Requests>(
 
   try {
     resp = (await deviceManager.send(command)) as HttpResponseData;
-    // console.log(request.requestId, "Raw Response", resp);
   } catch (err) {
-    console.error(request.requestId, "Error making request", err);
-    throw new IntentFlow.HandlerError(
+    throw createError(
       request.requestId,
       ErrorCode.GENERIC_ERROR,
-      (err as any).message || "uknown error"
+      `Error making request: ${err}`,
+      command
     );
   }
 
   // Response if the webhook is not registered.
   if (resp.httpResponse.statusCode === 200 && !resp.httpResponse.body) {
-    console.log("Webhook not registered");
-    throw new IntentFlow.HandlerError(
+    throw createError(
       request.requestId,
       ErrorCode.DEVICE_NOT_IDENTIFIED,
-      "Unknown Instance"
+      "Webhook not registered"
     );
   }
+
+  let response: any;
 
   try {
-    const response = JSON.parse(resp.httpResponse.body as string);
-
-    // Local SDK wants this.
-    response.intent = request.inputs[0].intent;
-
-    console.log(request.requestId, "Response", response);
-    return response;
+    response = JSON.parse(resp.httpResponse.body as string);
   } catch (err) {
-    console.error(request.requestId, "Error parsing body", err);
-
-    throw new IntentFlow.HandlerError(
+    throw createError(
       request.requestId,
       ErrorCode.GENERIC_ERROR,
-      (err as any).message || "unknown error"
+      `Error parsing body: ${err}`,
+      resp.httpResponse.body
     );
   }
+
+  // Local SDK wants this.
+  response.intent = request.inputs[0].intent;
+  console.log(request.requestId, "Response", response);
+  return response;
 };
 
 const app = new App(VERSION);
@@ -292,11 +302,10 @@ app
       const deviceToIdentify = request.inputs[0].payload.device;
 
       if (!deviceToIdentify.mdnsScanData) {
-        console.error(request.requestId, "No usable mdns scan data");
-        throw new IntentFlow.HandlerError(
+        throw createError(
           request.requestId,
           ErrorCode.DEVICE_NOT_IDENTIFIED,
-          "Unknown Instance"
+          "No usable mdns scan data"
         );
       }
 
@@ -305,11 +314,10 @@ app
           "._home-assistant._tcp.local"
         )
       ) {
-        console.error(request.requestId, "Not Home Assistant type");
-        throw new IntentFlow.HandlerError(
+        throw createError(
           request.requestId,
           ErrorCode.DEVICE_NOT_IDENTIFIED,
-          "Unknown Instance"
+          `Not Home Assistant type: ${deviceToIdentify.mdnsScanData.serviceName}`
         );
       }
 

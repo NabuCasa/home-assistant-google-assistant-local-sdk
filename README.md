@@ -17,6 +17,7 @@ Go to the [Google Actions console](https://console.actions.google.com/):
   - Enable "Support local query"
   - Add device scan configuration: "MDNS"
   - MDNS service name: `_home-assistant._tcp.local`
+  - Name: `.*\._home-assistant\._tcp\.local`
 
 ## Local SDK dev env
 
