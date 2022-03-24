@@ -69,8 +69,9 @@ interface DeviceDataForRequesting {
   id: string;
 }
 
-const VERSION = "2.1.1";
+const VERSION = "2.1.2";
 
+/** Create and log the error. */
 const createError = (
   requestId: string,
   errorCode: string,
@@ -81,17 +82,18 @@ const createError = (
   return new IntentFlow.HandlerError(requestId, errorCode, msg);
 };
 
-const getCustomDataByKey = async (
+/** Get custom data stored in devices from a specified lookup key. */
+const getCustomDataByKey = (
+  deviceManager: smarthome.DeviceManager,
   requestId: string,
   dataKey: keyof HassCustomDeviceData,
   expectedValue?: string
 ) => {
-  const deviceManager = await app.getDeviceManager();
-  const KEY_NOT_DEFINED = "_no_key_";
+  const VALUE_NOT_DEFINED = "_no_value_";
   const grouped: Record<string, HassCustomDeviceData> = {};
 
   if (expectedValue === undefined) {
-    expectedValue = KEY_NOT_DEFINED;
+    expectedValue = VALUE_NOT_DEFINED;
   }
 
   // Group valid scan data by key
@@ -100,8 +102,9 @@ const getCustomDataByKey = async (
     if (!customData || !("webhookId" in customData)) {
       continue;
     }
-    const value = customData[dataKey] || KEY_NOT_DEFINED;
-    if (!(value in grouped)) {
+    const value =
+      dataKey in customData ? customData[dataKey] : VALUE_NOT_DEFINED;
+    if (value !== undefined && !(value in grouped)) {
       grouped[value] = customData;
     }
   }
@@ -127,34 +130,34 @@ const getCustomDataByKey = async (
   return grouped[expectedValue];
 };
 
-const findDeviceCustomDataByMdnsData = async (
+/** Match the UUID of the discovered device with sync-ed devices. */
+const findDeviceCustomDataByMdnsData = (
+  deviceManager: smarthome.DeviceManager,
   requestId: string,
   mdnsScanData: { [key: string]: string }
-): Promise<HassCustomDeviceData> => {
-  return await getCustomDataByKey(requestId, "uuid", mdnsScanData.uuid);
-};
+) => getCustomDataByKey(deviceManager, requestId, "uuid", mdnsScanData.uuid);
 
-const getProxyDeviceDataForRequesting = async (
+/** Get the device data of the proxy device. */
+const getProxyDeviceData = (
+  deviceManager: smarthome.DeviceManager,
   requestId: string,
   proxyDeviceId: string
-): Promise<DeviceDataForRequesting> => {
-  const customData = await getCustomDataByKey(
+) => ({
+  id: proxyDeviceId,
+  customData: getCustomDataByKey(
+    deviceManager,
     requestId,
     "proxyDeviceId",
     proxyDeviceId
-  );
-  return {
-    id: proxyDeviceId,
-    customData,
-  };
-};
+  ),
+});
 
 // The types are wrong. The registered proxy device (HA) includes unparsed mdns props.
 interface RegisteredDeviceMdnsScanData extends IntentFlow.MdnsScanData {
   texts: string[];
 }
 
-const extractVersionFromMdnsRecords = (texts: string[]) => {
+const extractHAVersionFromMdnsRecords = (texts: string[]) => {
   for (const text of texts) {
     if (text.startsWith("version=")) {
       return text.split("=")[1];
@@ -162,8 +165,9 @@ const extractVersionFromMdnsRecords = (texts: string[]) => {
   }
 };
 
-const getHAVersion = async (): Promise<string | undefined> => {
-  const deviceManager = await app.getDeviceManager();
+const getHAVersionFromProxyDevice = (
+  deviceManager: smarthome.DeviceManager
+): string | undefined => {
   const proxyDevice = deviceManager
     .getRegisteredDevices()
     .find(
@@ -173,7 +177,7 @@ const getHAVersion = async (): Promise<string | undefined> => {
   if (!proxyDevice) {
     return;
   }
-  return extractVersionFromMdnsRecords(
+  return extractHAVersionFromMdnsRecords(
     (proxyDevice.scanData!.mdnsScanData as RegisteredDeviceMdnsScanData).texts
   );
 };
@@ -209,18 +213,19 @@ const createResponse = (
 const forwardRequest = async <T extends keyof Requests>(
   request: Requests[T]["request"],
   extractProxyDeviceData: (
-    request: Requests[T]["request"]
-  ) => Promise<DeviceDataForRequesting>,
+    deviceManager: smarthome.DeviceManager
+  ) => DeviceDataForRequesting,
   suppportedVersion?: [number, number]
 ): Promise<Requests[T]["response"]> => {
+  const deviceManager = await app.getDeviceManager();
   const intent = request.inputs[0].intent;
   const haVersion =
     intent == Intents.IDENTIFY
-      ? extractVersionFromMdnsRecords(
+      ? extractHAVersionFromMdnsRecords(
           (request as IntentFlow.IdentifyRequest).inputs[0].payload.device
             .mdnsScanData?.data || []
         )
-      : await getHAVersion();
+      : getHAVersionFromProxyDevice(deviceManager);
   console.log(`Sending ${intent} to HA ${haVersion}`, request);
 
   if (suppportedVersion) {
@@ -235,7 +240,7 @@ const forwardRequest = async <T extends keyof Requests>(
     }
   }
 
-  const proxyDeviceData = await extractProxyDeviceData(request);
+  const proxyDeviceData = extractProxyDeviceData(deviceManager);
 
   const command = new DataFlow.HttpRequestData();
   command.method = Constants.HttpOperation.POST;
@@ -250,8 +255,6 @@ const forwardRequest = async <T extends keyof Requests>(
   };
 
   // console.log(request.requestId, "Sending", command);
-
-  const deviceManager = await app.getDeviceManager();
 
   let resp: HttpResponseData;
 
@@ -298,10 +301,13 @@ const app = new App(VERSION);
 
 app
   .onIdentify((request) =>
-    forwardRequest<"identify">(request, async (request) => {
+    forwardRequest<"identify">(request, (deviceManager) => {
       const deviceToIdentify = request.inputs[0].payload.device;
 
-      if (!deviceToIdentify.mdnsScanData) {
+      if (
+        !deviceToIdentify.mdnsScanData ||
+        deviceToIdentify.mdnsScanData.data.length === 0
+      ) {
         throw createError(
           request.requestId,
           ErrorCode.DEVICE_NOT_IDENTIFIED,
@@ -322,19 +328,21 @@ app
       }
 
       return {
-        customData: await findDeviceCustomDataByMdnsData(
+        id: "",
+        customData: findDeviceCustomDataByMdnsData(
+          deviceManager,
           request.requestId,
           deviceToIdentify.mdnsScanData.txt
         ),
-        id: "",
       };
     })
   )
   .onProxySelected((request) =>
     forwardRequest<"proxySelected">(
       request,
-      (request) =>
-        getProxyDeviceDataForRequesting(
+      (deviceManager) =>
+        getProxyDeviceData(
+          deviceManager,
           request.requestId,
           request.inputs[0].payload.device.id!
         ),
@@ -342,8 +350,9 @@ app
     )
   )
   .onReachableDevices((request) =>
-    forwardRequest<"reachableDevices">(request, async (request) =>
-      getProxyDeviceDataForRequesting(
+    forwardRequest<"reachableDevices">(request, (deviceManager) =>
+      getProxyDeviceData(
+        deviceManager,
         request.requestId,
         request.inputs[0].payload.device.id!
       )
@@ -352,14 +361,13 @@ app
   .onQuery((request) =>
     forwardRequest<"query">(
       request,
-      async (request) =>
-        request.inputs[0].payload.devices[0] as DeviceDataForRequesting
+      () => request.inputs[0].payload.devices[0] as DeviceDataForRequesting
     )
   )
   .onExecute((request) =>
     forwardRequest<"execute">(
       request,
-      async (request) =>
+      () =>
         request.inputs[0].payload.commands[0]
           .devices[0] as DeviceDataForRequesting
     )
