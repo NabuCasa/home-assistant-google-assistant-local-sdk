@@ -69,12 +69,12 @@ interface DeviceDataForRequesting {
   id: string;
 }
 
-const VERSION = "2.1.2";
+const VERSION = "2.1.3";
 
 /** Create and log the error. */
 const createError = (
   requestId: string,
-  errorCode: string,
+  errorCode: ErrorCode,
   msg: string,
   ...extraLog: any[]
 ) => {
@@ -261,19 +261,16 @@ const forwardRequest = async <T extends keyof Requests>(
   try {
     resp = (await deviceManager.send(command)) as HttpResponseData;
   } catch (err) {
-    throw createError(
-      request.requestId,
-      ErrorCode.GENERIC_ERROR,
-      `Error making request: ${err}`,
-      command
-    );
+    console.error(`Error making request: ${err}`);
+    // Errors coming out of `deviceManager.send` are already Google errors.
+    throw err;
   }
 
   // Response if the webhook is not registered.
   if (resp.httpResponse.statusCode === 200 && !resp.httpResponse.body) {
     throw createError(
       request.requestId,
-      ErrorCode.DEVICE_NOT_IDENTIFIED,
+      ErrorCode.GENERIC_ERROR,
       "Webhook not registered"
     );
   }
@@ -286,7 +283,7 @@ const forwardRequest = async <T extends keyof Requests>(
     throw createError(
       request.requestId,
       ErrorCode.GENERIC_ERROR,
-      `Error parsing body: ${err}`,
+      `Error parsing body: ${resp.httpResponse.body}`,
       resp.httpResponse.body
     );
   }
