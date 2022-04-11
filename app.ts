@@ -10,51 +10,23 @@ import IntentFlow = smarthome.IntentFlow;
 import HttpResponseData = smarthome.DataFlow.HttpResponseData;
 import ErrorCode = IntentFlow.ErrorCode;
 
+type ReqRes<S> = S extends IntentFlow.IntentHandler<infer REQ, infer RES>
+  ? { request: REQ; response: RES }
+  : never;
+
 type Requests = {
-  query: {
-    request: IntentFlow.QueryRequest;
-    response: IntentFlow.QueryResponse;
-  };
-  execute: {
-    request: IntentFlow.ExecuteRequest;
-    response: IntentFlow.ExecuteResponse;
-  };
-  identify: {
-    request: IntentFlow.IdentifyRequest;
-    response: IntentFlow.IdentifyResponse;
-  };
-  reachableDevices: {
-    request: IntentFlow.ReachableDevicesRequest;
-    response: IntentFlow.ReachableDevicesResponse;
-  };
-  indicate: {
-    request: IntentFlow.IndicateRequest;
-    response: IntentFlow.IndicateResponse;
-  };
-  proxySelected: {
-    request: IntentFlow.ProxySelectedRequest;
-    response: IntentFlow.ProxySelectedResponse;
-  };
-  parseNotification: {
-    request: IntentFlow.ParseNotificationRequest;
-    response: IntentFlow.ParseNotificationResponse;
-  };
-  Provision: {
-    request: IntentFlow.ProvisionRequest;
-    response: IntentFlow.ProvisionResponse;
-  };
-  register: {
-    request: IntentFlow.RegisterRequest;
-    response: IntentFlow.RegisterResponse;
-  };
-  unprovision: {
-    request: IntentFlow.UnprovisionRequest;
-    response: IntentFlow.UnprovisionResponse;
-  };
-  update: {
-    request: IntentFlow.UpdateRequest;
-    response: IntentFlow.UpdateResponse;
-  };
+  // [Intents.EVENT]: ReqRes<IntentFlow.EventHandler>;
+  [Intents.EXECUTE]: ReqRes<IntentFlow.ExecuteHandler>;
+  [Intents.IDENTIFY]: ReqRes<IntentFlow.IdentifyHandler>;
+  // [Intents.INDICATE]: ReqRes<IntentFlow.IndicateHandler>;
+  // [Intents.PARSE_NOTIFICATION]: ReqRes<IntentFlow.ParseNotificationHandler>;
+  // [Intents.PROVISION]: ReqRes<IntentFlow.ProvisionHandler>;
+  [Intents.PROXY_SELECTED]: ReqRes<IntentFlow.ProxySelectedHandler>;
+  [Intents.QUERY]: ReqRes<IntentFlow.QueryHandler>;
+  [Intents.REACHABLE_DEVICES]: ReqRes<IntentFlow.ReachableDevicesHandler>;
+  // [Intents.REGISTER]: ReqRes<IntentFlow.RegisterHandler>;
+  // [Intents.UNPROVISION]: ReqRes<IntentFlow.UnprovisionHandler>;
+  // [Intents.UPDATE]: ReqRes<IntentFlow.UpdateHandler>;
 };
 
 interface HassCustomDeviceData {
@@ -69,7 +41,7 @@ interface DeviceDataForRequesting {
   id: string;
 }
 
-const VERSION = "2.1.3";
+const VERSION = "2.1.4";
 
 /** Create and log the error. */
 const createError = (
@@ -168,14 +140,13 @@ const extractHAVersionFromMdnsRecords = (texts: string[]) => {
 const getHAVersionFromProxyDevice = (
   deviceManager: smarthome.DeviceManager
 ): string | undefined => {
-  const proxyDevice = deviceManager
-    .getRegisteredDevices()
-    .find(
-      (dev) =>
-        (dev.scanData?.mdnsScanData as RegisteredDeviceMdnsScanData)?.texts
-    );
+  const proxyDevice = deviceManager.getRegisteredDevices().find(
+    (dev) =>
+      // Only the proxy device has scanData
+      (dev.scanData?.mdnsScanData as RegisteredDeviceMdnsScanData)?.texts
+  );
   if (!proxyDevice) {
-    return;
+    return undefined;
   }
   return extractHAVersionFromMdnsRecords(
     (proxyDevice.scanData!.mdnsScanData as RegisteredDeviceMdnsScanData).texts
@@ -211,27 +182,32 @@ const createResponse = (
 });
 
 const forwardRequest = async <T extends keyof Requests>(
+  intent: T,
   request: Requests[T]["request"],
   extractProxyDeviceData: (
     deviceManager: smarthome.DeviceManager
   ) => DeviceDataForRequesting,
-  suppportedVersion?: [number, number]
+  options: {
+    supportedHAVersion?: [number, number];
+    extractHAVersion?: (
+      deviceManager: smarthome.DeviceManager
+    ) => string | undefined;
+  } = {}
 ): Promise<Requests[T]["response"]> => {
   const deviceManager = await app.getDeviceManager();
-  const intent = request.inputs[0].intent;
-  const haVersion =
-    intent == Intents.IDENTIFY
-      ? extractHAVersionFromMdnsRecords(
-          (request as IntentFlow.IdentifyRequest).inputs[0].payload.device
-            .mdnsScanData?.data || []
-        )
-      : getHAVersionFromProxyDevice(deviceManager);
+  const haVersion = (options.extractHAVersion || getHAVersionFromProxyDevice)(
+    deviceManager
+  );
   console.log(`Sending ${intent} to HA ${haVersion}`, request);
 
-  if (suppportedVersion) {
+  if (options.supportedHAVersion) {
     if (
       !haVersion ||
-      !atleastVersion(haVersion, suppportedVersion[0], suppportedVersion[1])
+      !atleastVersion(
+        haVersion,
+        options.supportedHAVersion[0],
+        options.supportedHAVersion[1]
+      )
     ) {
       console.log(
         "Intent not supported by HA version. Returning empty response"
@@ -289,7 +265,7 @@ const forwardRequest = async <T extends keyof Requests>(
   }
 
   // Local SDK wants this.
-  response.intent = request.inputs[0].intent;
+  response.intent = intent;
   console.log(request.requestId, "Response", response);
   return response;
 };
@@ -298,44 +274,56 @@ const app = new App(VERSION);
 
 app
   .onIdentify((request) =>
-    forwardRequest<"identify">(request, (deviceManager) => {
-      const deviceToIdentify = request.inputs[0].payload.device;
+    forwardRequest(
+      Intents.IDENTIFY,
+      request,
+      (deviceManager) => {
+        const deviceToIdentify = request.inputs[0].payload.device;
 
-      if (
-        !deviceToIdentify.mdnsScanData ||
-        deviceToIdentify.mdnsScanData.data.length === 0
-      ) {
-        throw createError(
-          request.requestId,
-          ErrorCode.DEVICE_NOT_IDENTIFIED,
-          "No usable mdns scan data"
-        );
+        if (
+          !deviceToIdentify.mdnsScanData ||
+          deviceToIdentify.mdnsScanData.data.length === 0
+        ) {
+          throw createError(
+            request.requestId,
+            ErrorCode.DEVICE_NOT_IDENTIFIED,
+            "No usable mdns scan data"
+          );
+        }
+
+        if (
+          !deviceToIdentify.mdnsScanData.serviceName.endsWith(
+            "._home-assistant._tcp.local"
+          )
+        ) {
+          throw createError(
+            request.requestId,
+            ErrorCode.DEVICE_NOT_IDENTIFIED,
+            `Not Home Assistant type: ${deviceToIdentify.mdnsScanData.serviceName}`
+          );
+        }
+
+        return {
+          id: "",
+          customData: findDeviceCustomDataByMdnsData(
+            deviceManager,
+            request.requestId,
+            deviceToIdentify.mdnsScanData.txt
+          ),
+        };
+      },
+      {
+        extractHAVersion: () =>
+          extractHAVersionFromMdnsRecords(
+            request.inputs[0].payload.device.mdnsScanData?.data || []
+          ),
       }
-
-      if (
-        !deviceToIdentify.mdnsScanData.serviceName.endsWith(
-          "._home-assistant._tcp.local"
-        )
-      ) {
-        throw createError(
-          request.requestId,
-          ErrorCode.DEVICE_NOT_IDENTIFIED,
-          `Not Home Assistant type: ${deviceToIdentify.mdnsScanData.serviceName}`
-        );
-      }
-
-      return {
-        id: "",
-        customData: findDeviceCustomDataByMdnsData(
-          deviceManager,
-          request.requestId,
-          deviceToIdentify.mdnsScanData.txt
-        ),
-      };
-    })
+    )
   )
+  // Intents targeting the proxy device
   .onProxySelected((request) =>
-    forwardRequest<"proxySelected">(
+    forwardRequest(
+      Intents.PROXY_SELECTED,
       request,
       (deviceManager) =>
         getProxyDeviceData(
@@ -343,11 +331,11 @@ app
           request.requestId,
           request.inputs[0].payload.device.id!
         ),
-      [2022, 3]
+      { supportedHAVersion: [2022, 3] }
     )
   )
   .onReachableDevices((request) =>
-    forwardRequest<"reachableDevices">(request, (deviceManager) =>
+    forwardRequest(Intents.REACHABLE_DEVICES, request, (deviceManager) =>
       getProxyDeviceData(
         deviceManager,
         request.requestId,
@@ -355,14 +343,17 @@ app
       )
     )
   )
+  // Intents targeting a device in Home Assistant
   .onQuery((request) =>
-    forwardRequest<"query">(
+    forwardRequest(
+      Intents.QUERY,
       request,
       () => request.inputs[0].payload.devices[0] as DeviceDataForRequesting
     )
   )
   .onExecute((request) =>
-    forwardRequest<"execute">(
+    forwardRequest(
+      Intents.EXECUTE,
       request,
       () =>
         request.inputs[0].payload.commands[0]
