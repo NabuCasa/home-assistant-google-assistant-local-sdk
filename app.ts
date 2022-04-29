@@ -33,7 +33,6 @@ interface HassCustomDeviceData {
   webhookId: string;
   httpPort: number;
   uuid?: string;
-  proxyDeviceId: string;
 }
 
 interface DeviceDataForRequesting {
@@ -41,7 +40,7 @@ interface DeviceDataForRequesting {
   id: string;
 }
 
-const VERSION = "2.1.4";
+const VERSION = "2.1.5";
 
 /** Create and log the error. */
 const createError = (
@@ -54,87 +53,40 @@ const createError = (
   return new IntentFlow.HandlerError(requestId, errorCode, msg);
 };
 
-/** Get custom data stored in devices from a specified lookup key. */
-const getCustomDataByKey = (
+/** Get Home Assistant info stored in device custom data. */
+const getHassCustomData = (
   deviceManager: smarthome.DeviceManager,
-  requestId: string,
-  dataKey: keyof HassCustomDeviceData,
-  expectedValue?: string
-) => {
-  const VALUE_NOT_DEFINED = "_no_value_";
-  const grouped: Record<string, HassCustomDeviceData> = {};
-
-  if (expectedValue === undefined) {
-    expectedValue = VALUE_NOT_DEFINED;
-  }
-
-  // Group valid scan data by key
+  requestId: string
+): HassCustomDeviceData => {
   for (const device of deviceManager.getRegisteredDevices()) {
-    const customData = device.customData as HassCustomDeviceData;
-    if (!customData || !("webhookId" in customData)) {
-      continue;
-    }
-    const value =
-      dataKey in customData ? customData[dataKey] : VALUE_NOT_DEFINED;
-    if (value !== undefined && !(value in grouped)) {
-      grouped[value] = customData;
+    const customData = device.customData as HassCustomDeviceData | undefined;
+    if (customData && "webhookId" in customData && "httpPort" in customData) {
+      return customData;
     }
   }
 
-  if (Object.keys(grouped).length === 0) {
-    throw createError(
-      requestId,
-      ErrorCode.DEVICE_VERIFICATION_FAILED,
-      "Unable to find HASS connection info.",
-      deviceManager.getRegisteredDevices()
-    );
-  }
-
-  if (!(expectedValue in grouped)) {
-    throw createError(
-      requestId,
-      ErrorCode.DEVICE_VERIFICATION_FAILED,
-      `Unable to find HA instance in sync-ed devices matching on ${dataKey}.`,
-      deviceManager.getRegisteredDevices()
-    );
-  }
-
-  return grouped[expectedValue];
-};
-
-/** Match the UUID of the discovered device with sync-ed devices. */
-const findDeviceCustomDataByMdnsData = (
-  deviceManager: smarthome.DeviceManager,
-  requestId: string,
-  mdnsScanData: { [key: string]: string }
-) => getCustomDataByKey(deviceManager, requestId, "uuid", mdnsScanData.uuid);
-
-/** Get the device data of the proxy device. */
-const getProxyDeviceData = (
-  deviceManager: smarthome.DeviceManager,
-  requestId: string,
-  proxyDeviceId: string
-) => ({
-  id: proxyDeviceId,
-  customData: getCustomDataByKey(
-    deviceManager,
+  throw createError(
     requestId,
-    "proxyDeviceId",
-    proxyDeviceId
-  ),
-});
+    ErrorCode.DEVICE_VERIFICATION_FAILED,
+    `Unable to find HASS connection info.`,
+    deviceManager.getRegisteredDevices()
+  );
+};
 
 // The types are wrong. The registered proxy device (HA) includes unparsed mdns props.
 interface RegisteredDeviceMdnsScanData extends IntentFlow.MdnsScanData {
   texts: string[];
 }
 
-const extractHAVersionFromMdnsRecords = (texts: string[]) => {
+const extractHAVersionFromMdnsRecords = (
+  texts: string[]
+): string | undefined => {
   for (const text of texts) {
     if (text.startsWith("version=")) {
       return text.split("=")[1];
     }
   }
+  return undefined;
 };
 
 const getHAVersionFromProxyDevice = (
@@ -153,7 +105,11 @@ const getHAVersionFromProxyDevice = (
   );
 };
 
-const atleastVersion = (haVersion: string, major: number, minor: number) => {
+const atleastVersion = (
+  haVersion: string,
+  major: number,
+  minor: number
+): boolean => {
   const parts = haVersion.split(".");
   if (parts.length < 2) {
     return false;
@@ -176,7 +132,6 @@ const createResponse = (
   request: smarthome.IntentRequest,
   payload: smarthome.IntentResponse["payload"]
 ): any => ({
-  intent: request.inputs[0].intent,
   requestId: request.requestId,
   payload,
 });
@@ -184,10 +139,9 @@ const createResponse = (
 const forwardRequest = async <T extends keyof Requests>(
   intent: T,
   request: Requests[T]["request"],
-  extractProxyDeviceData: (
-    deviceManager: smarthome.DeviceManager
-  ) => DeviceDataForRequesting,
+  targetDeviceId: string,
   options: {
+    isRetry?: boolean;
     supportedHAVersion?: [number, number];
     extractHAVersion?: (
       deviceManager: smarthome.DeviceManager
@@ -200,30 +154,22 @@ const forwardRequest = async <T extends keyof Requests>(
   );
   console.log(`Sending ${intent} to HA ${haVersion}`, request);
 
-  if (options.supportedHAVersion) {
-    if (
-      !haVersion ||
-      !atleastVersion(
-        haVersion,
-        options.supportedHAVersion[0],
-        options.supportedHAVersion[1]
-      )
-    ) {
-      console.log(
-        "Intent not supported by HA version. Returning empty response"
-      );
-      return createResponse(request, {} as any);
-    }
+  if (
+    options.supportedHAVersion &&
+    (!haVersion || !atleastVersion(haVersion, ...options.supportedHAVersion))
+  ) {
+    console.log("Intent not supported by HA version. Returning empty response");
+    return createResponse(request, {} as any);
   }
 
-  const proxyDeviceData = extractProxyDeviceData(deviceManager);
+  const deviceData = getHassCustomData(deviceManager, request.requestId);
 
   const command = new DataFlow.HttpRequestData();
   command.method = Constants.HttpOperation.POST;
   command.requestId = request.requestId;
-  command.deviceId = proxyDeviceData.id;
-  command.port = proxyDeviceData.customData.httpPort;
-  command.path = `/api/webhook/${proxyDeviceData.customData.webhookId}`;
+  command.deviceId = targetDeviceId;
+  command.port = deviceData.httpPort;
+  command.path = `/api/webhook/${deviceData.webhookId}`;
   command.data = JSON.stringify(request);
   command.dataType = "application/json";
   command.additionalHeaders = {
@@ -232,18 +178,32 @@ const forwardRequest = async <T extends keyof Requests>(
 
   // console.log(request.requestId, "Sending", command);
 
-  let resp: HttpResponseData;
+  let rawResponse: HttpResponseData;
 
   try {
-    resp = (await deviceManager.send(command)) as HttpResponseData;
+    rawResponse = (await deviceManager.send(command)) as HttpResponseData;
   } catch (err) {
     console.error(`Error making request: ${err}`);
     // Errors coming out of `deviceManager.send` are already Google errors.
     throw err;
   }
 
-  // Response if the webhook is not registered.
-  if (resp.httpResponse.statusCode === 200 && !resp.httpResponse.body) {
+  // Detect the response if the webhook is not registered.
+  // This can happen if user logs out from cloud while Google still
+  // has devices synced or if Home Assistant is restarting and Google Assistant
+  // integration is not yet initialized.
+  if (
+    rawResponse.httpResponse.statusCode === 200 &&
+    !rawResponse.httpResponse.body
+  ) {
+    // Retry in case it's because of initialization.
+    if (!options.isRetry) {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      return await forwardRequest(intent, request, targetDeviceId, {
+        ...options,
+        isRetry: true,
+      });
+    }
     throw createError(
       request.requestId,
       ErrorCode.GENERIC_ERROR,
@@ -251,21 +211,19 @@ const forwardRequest = async <T extends keyof Requests>(
     );
   }
 
-  let response: any;
+  let response: Requests[T]["response"];
 
   try {
-    response = JSON.parse(resp.httpResponse.body as string);
+    response = JSON.parse(rawResponse.httpResponse.body as string);
   } catch (err) {
     throw createError(
       request.requestId,
       ErrorCode.GENERIC_ERROR,
-      `Error parsing body: ${resp.httpResponse.body}`,
-      resp.httpResponse.body
+      `Error parsing body: ${rawResponse.httpResponse.body}`,
+      rawResponse.httpResponse.body
     );
   }
 
-  // Local SDK wants this.
-  response.intent = intent;
   console.log(request.requestId, "Response", response);
   return response;
 };
@@ -273,74 +231,69 @@ const forwardRequest = async <T extends keyof Requests>(
 const app = new App(VERSION);
 
 app
-  .onIdentify((request) =>
-    forwardRequest(
-      Intents.IDENTIFY,
-      request,
-      (deviceManager) => {
-        const deviceToIdentify = request.inputs[0].payload.device;
+  .onIdentify(async (request) => {
+    const deviceToIdentify = request.inputs[0].payload.device;
 
-        if (
-          !deviceToIdentify.mdnsScanData ||
-          deviceToIdentify.mdnsScanData.data.length === 0
-        ) {
-          throw createError(
-            request.requestId,
-            ErrorCode.DEVICE_NOT_IDENTIFIED,
-            "No usable mdns scan data"
-          );
-        }
+    if (
+      !deviceToIdentify.mdnsScanData ||
+      deviceToIdentify.mdnsScanData.data.length === 0
+    ) {
+      throw createError(
+        request.requestId,
+        ErrorCode.DEVICE_NOT_IDENTIFIED,
+        "No usable mdns scan data"
+      );
+    }
 
-        if (
-          !deviceToIdentify.mdnsScanData.serviceName.endsWith(
-            "._home-assistant._tcp.local"
-          )
-        ) {
-          throw createError(
-            request.requestId,
-            ErrorCode.DEVICE_NOT_IDENTIFIED,
-            `Not Home Assistant type: ${deviceToIdentify.mdnsScanData.serviceName}`
-          );
-        }
+    if (
+      !deviceToIdentify.mdnsScanData.serviceName.endsWith(
+        "._home-assistant._tcp.local"
+      )
+    ) {
+      throw createError(
+        request.requestId,
+        ErrorCode.DEVICE_NOT_IDENTIFIED,
+        `Not Home Assistant type: ${deviceToIdentify.mdnsScanData.serviceName}`
+      );
+    }
 
-        return {
-          id: "",
-          customData: findDeviceCustomDataByMdnsData(
-            deviceManager,
-            request.requestId,
-            deviceToIdentify.mdnsScanData.txt
-          ),
-        };
-      },
-      {
-        extractHAVersion: () =>
-          extractHAVersionFromMdnsRecords(
-            request.inputs[0].payload.device.mdnsScanData?.data || []
-          ),
-      }
-    )
-  )
+    const deviceManager = await app.getDeviceManager();
+    const customData = getHassCustomData(deviceManager, request.requestId);
+
+    if (
+      deviceToIdentify.mdnsScanData.txt.uuid &&
+      customData.uuid &&
+      deviceToIdentify.mdnsScanData.txt.uuid !== customData.uuid
+    ) {
+      throw createError(
+        request.requestId,
+        ErrorCode.DEVICE_VERIFICATION_FAILED,
+        `UUID does not match.`,
+        deviceManager.getRegisteredDevices()
+      );
+    }
+
+    return await forwardRequest(Intents.IDENTIFY, request, "", {
+      extractHAVersion: () =>
+        extractHAVersionFromMdnsRecords(
+          request.inputs[0].payload.device.mdnsScanData?.data || []
+        ),
+    });
+  })
   // Intents targeting the proxy device
   .onProxySelected((request) =>
     forwardRequest(
       Intents.PROXY_SELECTED,
       request,
-      (deviceManager) =>
-        getProxyDeviceData(
-          deviceManager,
-          request.requestId,
-          request.inputs[0].payload.device.id!
-        ),
+      request.inputs[0].payload.device.id!,
       { supportedHAVersion: [2022, 3] }
     )
   )
   .onReachableDevices((request) =>
-    forwardRequest(Intents.REACHABLE_DEVICES, request, (deviceManager) =>
-      getProxyDeviceData(
-        deviceManager,
-        request.requestId,
-        request.inputs[0].payload.device.id!
-      )
+    forwardRequest(
+      Intents.REACHABLE_DEVICES,
+      request,
+      request.inputs[0].payload.device.id!
     )
   )
   // Intents targeting a device in Home Assistant
@@ -348,16 +301,14 @@ app
     forwardRequest(
       Intents.QUERY,
       request,
-      () => request.inputs[0].payload.devices[0] as DeviceDataForRequesting
+      request.inputs[0].payload.devices[0].id
     )
   )
   .onExecute((request) =>
     forwardRequest(
       Intents.EXECUTE,
       request,
-      () =>
-        request.inputs[0].payload.commands[0]
-          .devices[0] as DeviceDataForRequesting
+      request.inputs[0].payload.commands[0].devices[0].id
     )
   )
   .listen()

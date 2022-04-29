@@ -2,6 +2,8 @@
   "compilerOptions": {
     "target": "es2018",
     "moduleResolution": "node",
-    "strict": true
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true
   }
 }
