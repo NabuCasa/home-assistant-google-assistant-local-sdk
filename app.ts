@@ -78,12 +78,15 @@ interface RegisteredDeviceMdnsScanData extends IntentFlow.MdnsScanData {
   texts: string[];
 }
 
-const extractHAVersionFromMdnsRecords = (texts: string[]) => {
+const extractHAVersionFromMdnsRecords = (
+  texts: string[]
+): string | undefined => {
   for (const text of texts) {
     if (text.startsWith("version=")) {
       return text.split("=")[1];
     }
   }
+  return undefined;
 };
 
 const getHAVersionFromProxyDevice = (
@@ -102,7 +105,11 @@ const getHAVersionFromProxyDevice = (
   );
 };
 
-const atleastVersion = (haVersion: string, major: number, minor: number) => {
+const atleastVersion = (
+  haVersion: string,
+  major: number,
+  minor: number
+): boolean => {
   const parts = haVersion.split(".");
   if (parts.length < 2) {
     return false;
