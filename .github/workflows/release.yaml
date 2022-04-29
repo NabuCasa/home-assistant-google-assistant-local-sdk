@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+# Set default workflow permissions
+# All scopes not mentioned here are set to no access
+# https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token
+permissions:
+  actions: none
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Required to upload release assets
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v2
+
+      - name: Set up Node
+        uses: actions/setup-node@v2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v0.1.14
+        with:
+          files: app.js
