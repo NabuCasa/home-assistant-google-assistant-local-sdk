@@ -35,11 +35,6 @@ interface HassCustomDeviceData {
   uuid?: string;
 }
 
-interface DeviceDataForRequesting {
-  customData: HassCustomDeviceData;
-  id: string;
-}
-
 const VERSION = "2.1.5";
 
 /** Create and log the error. */
