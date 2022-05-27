@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
-    "server": "http-server .",
+    "server": "http-server . -p 8081",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
