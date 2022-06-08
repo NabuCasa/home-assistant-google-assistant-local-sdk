@@ -169,7 +169,15 @@ class RequestResponseHandler<T extends keyof Requests> {
       !rawResponse.httpResponse.body
     ) {
       // Retry in case it's because of initialization.
-      if (!isRetry) {
+      if (
+        !isRetry &&
+        [
+          Intents.IDENTIFY,
+          Intents.PROXY_SELECTED,
+          Intents.REACHABLE_DEVICES,
+          Intents.QUERY,
+        ].includes(this.intent)
+      ) {
         return await this.forwardRequest(targetDeviceId, true);
       }
       throw this.createError(ErrorCode.GENERIC_ERROR, "Webhook not registered");
