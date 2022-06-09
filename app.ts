@@ -75,6 +75,9 @@ class RequestResponseHandler<T extends keyof Requests> {
   /** Create and log the error. */
   createError(errorCode: ErrorCode, msg: string, ...extraLog: any[]) {
     this.logError(`Error ${errorCode}`, msg, ...extraLog);
+    if (this.haVersion) {
+      msg += ` (HA/${this.haVersion})`;
+    }
     return new IntentFlow.HandlerError(this.request.requestId, errorCode, msg);
   }
 
