@@ -112,10 +112,16 @@ class RequestResponseHandler<T extends keyof Requests> {
   }
 
   logMessage(msg: string, ...extraLog: any[]) {
+    if (extraLog.length > 0) {
+      msg += "\n";
+    }
     console.log(this.logPrefix, msg, ...extraLog);
   }
 
   logError(msg: string, ...extraLog: any[]) {
+    if (extraLog.length > 0) {
+      msg += "\n";
+    }
     console.error(this.logPrefix, msg, ...extraLog);
   }
 
@@ -212,19 +218,6 @@ class RequestResponseHandler<T extends keyof Requests> {
 interface RegisteredDeviceMdnsScanData extends IntentFlow.MdnsScanData {
   texts: string[];
 }
-
-const stringToColor = (str: string) => {
-  var hash = 0;
-  for (var i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  var color = "#";
-  for (var i = 0; i < 3; i++) {
-    var value = (hash >> (i * 8)) & 0xff;
-    color += ("00" + value.toString(16)).substr(-2);
-  }
-  return color;
-};
 
 const extractHAVersionFromMdnsRecords = (
   texts: string[]
@@ -328,11 +321,12 @@ app
     return await handler.forwardRequest("");
   })
   // Intents targeting the proxy device
-  .onProxySelected((request) =>
-    new RequestResponseHandler(Intents.PROXY_SELECTED, request, {
-      supportedHAVersion: [2022, 3],
-    }).forwardRequest(request.inputs[0].payload.device.id!)
-  )
+  // This used to fix things, in June 2022 it breaks things?
+  // .onProxySelected((request) =>
+  //   new RequestResponseHandler(Intents.PROXY_SELECTED, request, {
+  //     supportedHAVersion: [2022, 3],
+  //   }).forwardRequest(request.inputs[0].payload.device.id!)
+  // )
   .onReachableDevices((request) =>
     new RequestResponseHandler(
       Intents.REACHABLE_DEVICES,
