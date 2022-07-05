@@ -15,7 +15,7 @@ jobs:
       - name: Check out files from GitHub
         uses: actions/checkout@v2
       - name: Set up Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v3
 
       - name: Install dependencies
         run: npm ci
