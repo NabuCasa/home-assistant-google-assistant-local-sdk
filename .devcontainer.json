@@ -1,0 +1,6 @@
+{
+	"name": "home-assistant-google-assistant-local-sdk",
+	"image": "mcr.microsoft.com/devcontainers/typescript-node:0-18",
+	"appPort": ["8080:8081"],
+	"postCreateCommand": "npm install"
+}
